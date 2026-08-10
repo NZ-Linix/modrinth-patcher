@@ -207,7 +207,7 @@ func (b *Binary) ReplaceAsset(am *AssetMap, key string, value []byte) (int, erro
 		comp = comp2
 	}
 	if len(comp) > a.blobLen {
-		return 0, fmt.Errorf("recompressed asset %q (%d) exceeds original (%d)", key, len(comp), a.blobLen)
+		return 0, fmt.Errorf("recompressed asset %q (%d) exceeds original (%d): the app may have a new build the patcher can't recompress to fit — update the patcher (re-run install.sh/install.bat) and retry", key, len(comp), a.blobLen)
 	}
 	// zero the original region, then write the new stream at the start
 	for i := 0; i < a.blobLen; i++ {
