@@ -1,5 +1,11 @@
 # modrinth-patcher
 
+---
+
+Heads up: This is vibe-coded
+
+---
+
 Removes ads from the **Modrinth App** launcher (the open-source desktop app for
 managing Minecraft modpacks) on **macOS** and **Windows**.
 
