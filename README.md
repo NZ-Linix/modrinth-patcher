@@ -131,3 +131,27 @@ internal/patch/         core: binary handling, asset extraction, JS markers
 - No network requests to `modrinth.com/wrapper/app-ads-cookie` (check with a
   proxy, or just trust the URL rewrite).
 - `strings <binary> | grep wrapper/app-ads-cookie` returns nothing.
+
+## Install to PATH (global `modrinth-patcher` command)
+
+The repo ships installer scripts that copy the newest build from `dist/` onto
+your PATH as `modrinth-patcher`:
+
+```sh
+# macOS / Linux
+./install.sh                 # installs to /usr/local/bin (sudo if needed)
+
+# Windows (double-click or from cmd/PowerShell)
+install.bat                  # installs to %LOCALAPPDATA%\Programs\modrinth-patcher
+```
+
+- `install.sh` picks `modrinth-patcher-macos-arm64` on Apple Silicon and
+  `modrinth-patcher-macos-x64` on Intel; override the destination with
+  `DEST_DIR=~/bin ./install.sh`.
+- `install.bat` installs `modrinth-patcher-windows-amd64.exe`, adds the
+  folder to your **user** PATH (no admin needed), and is idempotent
+  (re-running won't duplicate the PATH entry). Open a new terminal after
+  installing for PATH changes to take effect.
+
+Both always overwrite with the current `dist/` build, so re-run after
+rebuilding.
