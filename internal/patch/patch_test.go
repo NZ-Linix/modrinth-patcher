@@ -237,7 +237,7 @@ func TestBrotliLgwin24(t *testing.T) {
 // TestReplaceAssetFallback verifies ReplaceAsset falls back to q11 when q9
 // exceeds the blob budget.
 func TestReplaceAssetFallback(t *testing.T) {
-	b := &Binary{data: make([]byte, 1 << 20)}
+	b := &Binary{data: make([]byte, 1<<20)}
 	am := &AssetMap{assets: []Asset{{Key: "k", blobOffset: 100, blobLen: 100}}, byKey: map[string]int{"k": 0}}
 	// data that compresses to ~>100 bytes at q9 but <=100 at q11 is hard to
 	// craft reliably; instead verify the q9 path works and the overflow path
