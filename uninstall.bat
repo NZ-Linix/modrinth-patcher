@@ -6,7 +6,7 @@ rem  Reverses install.bat: closes Modrinth App, restores the original binary
 rem  (--unpatch), removes the installed patcher + PATH entry + scheduled task.
 rem
 rem  Run locally:   uninstall.bat
-rem  Run remotely:  PowerShell:  iex (irm <url>)        (see README one-liner)
+rem  Run remotely:  PowerShell:  irm <url> -OutFile %TEMP%\mp.bat; cmd /c %TEMP%\mp.bat
 rem
 rem  Environment overrides:
 rem    DEST_DIR=C:\Tools     where the patcher was installed

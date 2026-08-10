@@ -70,11 +70,14 @@ curl -fsSL "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/uni
 ```
 
 ```powershell
-# Windows — install (run in PowerShell)
-iex (irm "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/install.bat")
+# Windows — install (run in PowerShell; downloads the .bat to a temp file
+# and runs it via cmd, since PowerShell can't execute batch syntax directly)
+irm "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/install.bat" -OutFile "$env:TEMP\mp-install.bat"
+cmd /c "$env:TEMP\mp-install.bat"
 
 # Windows — uninstall
-iex (irm "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/uninstall.bat")
+irm "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/uninstall.bat" -OutFile "$env:TEMP\mp-uninstall.bat"
+cmd /c "$env:TEMP\mp-uninstall.bat"
 ```
 
 ### Local runs

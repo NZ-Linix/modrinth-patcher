@@ -6,7 +6,7 @@ rem  Installs the newest modrinth-patcher build, quits the Modrinth App if it
 rem  is running, patches ads out, and relaunches the app.
 rem
 rem  Run locally:   install.bat
-rem  Run remotely:  PowerShell:  iex (irm <url>)        (see README one-liner)
+rem  Run remotely:  PowerShell:  irm <url> -OutFile %TEMP%\mp.bat; cmd /c %TEMP%\mp.bat
 rem
 rem  Environment overrides:
 rem    DEST_DIR=C:\Tools     install destination  (default %LOCALAPPDATA%\Programs\modrinth-patcher)
