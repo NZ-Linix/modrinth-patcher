@@ -78,9 +78,14 @@ Without the watcher, just run the patcher again.
 ./modrinth-patcher --unpatch
 ```
 
-restores the original binary from the backup. (The watcher will re-patch it on
-the next poll — remove the LaunchAgent/scheduled task first if you want to
-stay unpatched.)
+restores the original binary from the backup and disables the auto-repatch
+watcher (LaunchAgent / scheduled task) so the restore sticks.
+
+### A note on backups and updates
+
+`--unpatch` restores the `.orig` backup of the *current* version. If the app
+self-updated since you last ran the patcher, re-run the patcher once (it
+refreshes the backup from the new version) before `--unpatch`.
 
 ## macOS notes
 

@@ -12,6 +12,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -34,7 +35,7 @@ func main() {
 	)
 	flag.StringVar(&binaryPath, "binary", "", "path to the Modrinth App binary (auto-detected if empty)")
 	flag.BoolVar(&doUnpatch, "unpatch", false, "restore the original binary from the backup")
-	flag.BoolVar(&doWatch, "watch", false, "run the auto-repatch watcher (installed by --install-watch)")
+	flag.BoolVar(&doWatch, "watch", false, "run the auto-repatch watcher (internal; also used by the installed launch job)")
 	flag.BoolVar(&noWatch, "no-watch", false, "do not install the auto-repatch watcher")
 	flag.BoolVar(&showVer, "version", false, "print version and exit")
 	flag.Usage = usage
@@ -71,11 +72,16 @@ func main() {
 	}
 
 	if doUnpatch {
+		if err := uninstallWatcher(); err != nil {
+			fmt.Fprintln(os.Stderr, "warning: could not disable auto-repatch watcher:", err)
+			fmt.Fprintln(os.Stderr, "it may re-patch the restored binary on its next poll.")
+		}
 		if err := unpatch(abs); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
 		fmt.Printf("restored original binary from backup: %s\n", abs)
+		fmt.Println("auto-repatch watcher disabled — re-run the patcher to re-enable it.")
 		return
 	}
 
@@ -113,10 +119,12 @@ func runPatch(abs string, installWatch bool) error {
 	if patch.IsPatched(b) {
 		fmt.Println("binary already patched, skipping")
 	} else {
-		// backup
+		// backup: keep the pristine original of the *current* version. After an
+		// app self-update the binary changes; refresh the backup so --unpatch
+		// restores the matching version.
 		backup := abs + ".orig"
-		if _, err := os.Stat(backup); os.IsNotExist(err) {
-			if err := os.WriteFile(backup, b.Data(), 0o755); err != nil {
+		if cur, err := os.ReadFile(backup); err != nil || !bytes.Equal(cur, b.Data()) {
+			if err := writeFileAtomic(backup, b.Data(), 0o755); err != nil {
 				return fmt.Errorf("backup: %w", err)
 			}
 			fmt.Printf("backed up original to %s\n", backup)
@@ -125,7 +133,7 @@ func runPatch(abs string, installWatch bool) error {
 		if err != nil {
 			return err
 		}
-		if err := b.Write(abs); err != nil {
+		if err := writeFileAtomic(abs, b.Data(), 0o755); err != nil {
 			return fmt.Errorf("write patched binary: %w", err)
 		}
 		fmt.Println("patched:", summary)
@@ -158,7 +166,7 @@ func unpatch(abs string) error {
 	if err != nil {
 		return fmt.Errorf("read backup: %w", err)
 	}
-	if err := os.WriteFile(abs, data, 0o755); err != nil {
+	if err := writeFileAtomic(abs, data, 0o755); err != nil {
 		return fmt.Errorf("restore: %w", err)
 	}
 	if runtime.GOOS == "darwin" {
@@ -215,4 +223,32 @@ func resignApp(binPath string) error {
 		return fmt.Errorf("not inside an .app bundle: %s", binPath)
 	}
 	return codesignAdHoc(app)
+}
+
+// writeFileAtomic writes data to path via a temp file + rename, so a crash
+// mid-write never leaves a corrupt binary behind.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".modrinth-patcher-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }

@@ -22,8 +22,6 @@ func runWatcher() error {
 	}
 	fmt.Printf("watcher: monitoring %s\n", bin)
 
-	// also watch the .orig backup so a re-patch after update creates a fresh
-	// backup of the *new* version only if none exists yet.
 	for {
 		time.Sleep(30 * time.Second)
 
@@ -45,7 +43,7 @@ func runWatcher() error {
 // installWatcher registers a persistent auto-repatch job:
 //
 //	macOS:  ~/Library/LaunchAgents/com.modrinth-patcher.plist (LaunchAgent)
-//	windows: schtasks /create ... (runs at logon, every 15 min)
+//	windows: schtasks /create ... (runs at logon)
 func installWatcher() error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -60,6 +58,19 @@ func installWatcher() error {
 		return installScheduledTask(exe)
 	default:
 		return fmt.Errorf("no watcher support on %s", runtime.GOOS)
+	}
+}
+
+// uninstallWatcher removes the auto-repatch job (used by --unpatch so the
+// restored binary stays unpatched).
+func uninstallWatcher() error {
+	switch runtime.GOOS {
+	case "darwin":
+		return uninstallLaunchAgent()
+	case "windows":
+		return uninstallScheduledTask()
+	default:
+		return nil
 	}
 }
 
@@ -87,31 +98,40 @@ func installLaunchAgent(exe string) error {
 </dict>
 </plist>
 `, exe, logPath(), logPath())
-	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
+	if err := writeFileAtomic(plistPath, []byte(plist), 0o644); err != nil {
 		return err
 	}
 	// load it (ignore failure: may already be loaded / not bootstrapped)
-	_ = execCommand("launchctl", "unload", plistPath)
-	return execCommand("launchctl", "load", plistPath)
+	_ = runCommand("launchctl", "unload", plistPath)
+	return runCommand("launchctl", "load", plistPath)
+}
+
+func uninstallLaunchAgent() error {
+	plistPath := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.modrinth-patcher.plist")
+	_ = runCommand("launchctl", "unload", plistPath)
+	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func installScheduledTask(exe string) error {
-	// Runs at logon and every 15 minutes; the watcher loop exits after a
-	// successful check so the task re-runs it periodically.
+	// Runs at logon; the task starts the watcher loop which stays alive.
+	// /TR quoting for cmd.exe: wrap in \"...\" (cmd does not treat \ as an
+	// escape char, so a plain backslash-quote pair is correct).
 	cmd := fmt.Sprintf(
-		`schtasks /Create /F /TN "ModrinthPatcher" /TR "\"%s\" --watch --once" /SC ONLOGON /RL LIMITED`,
+		`schtasks /Create /F /TN "ModrinthPatcher" /TR "\"%s\" --watch" /SC ONLOGON /RL LIMITED`,
 		exe,
 	)
-	return execCommand("cmd.exe", "/C", cmd)
+	return runCommand("cmd.exe", "/C", cmd)
+}
+
+func uninstallScheduledTask() error {
+	return runCommand("cmd.exe", "/C", `schtasks /Delete /F /TN "ModrinthPatcher"`)
 }
 
 func logPath() string {
 	dir := filepath.Join(os.Getenv("HOME"), "Library", "Logs", "ModrinthPatcher")
 	_ = os.MkdirAll(dir, 0o755)
 	return filepath.Join(dir, "patcher.log")
-}
-
-// execCommand runs a command and returns an error including its output.
-func execCommand(name string, args ...string) error {
-	return runCommand(name, args...)
 }

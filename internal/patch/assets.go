@@ -255,10 +255,3 @@ func brotliCompress(data []byte, quality int) ([]byte, error) {
 func brotliDecompress(r io.Reader) ([]byte, error) {
 	return io.ReadAll(brotli.NewReader(r))
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

@@ -1,7 +1,6 @@
 package patch
 
 import (
-	"bytes"
 	"fmt"
 	"regexp"
 )
@@ -77,13 +76,17 @@ func buildMarkers() []jsMarker {
 }
 
 // ApplyPatches patches one binary: the native ad-URL strings, then the
-// embedded main JS bundle. It returns a human-readable summary.
+// embedded main JS bundle. It returns a human-readable summary. Calling it on
+// an already-patched binary is a no-op (idempotent).
 func ApplyPatches(b *Binary) (string, error) {
 	var notes []string
 
 	// 1. Native layer: rewrite the ad webview URL.
 	//    macOS universal: once per slice (2 total). Windows: once.
 	if n, err := b.ReplaceAll([]byte(adLink), []byte(blankURL)); err != nil {
+		if b.Count([]byte(blankURL)) > 0 {
+			return "already patched (native URL)", nil
+		}
 		return "", fmt.Errorf("ad URL string: %w", err)
 	} else {
 		notes = append(notes, fmt.Sprintf("ad-webview URL rewritten in %d place(s)", n))
@@ -126,7 +129,8 @@ func ApplyPatches(b *Binary) (string, error) {
 
 // patchJS applies the jsMarkers to the decompressed JS bundle. It returns the
 // patched bytes and how many markers matched. Required markers must match
-// exactly once; optional markers are applied when present (0 or 1 times).
+// exactly once; optional markers are applied to every occurrence when present
+// (some promo URLs may legitimately appear more than once in the bundle).
 func patchJS(js []byte) ([]byte, int, error) {
 	out := append([]byte(nil), js...)
 	changed := 0
@@ -137,7 +141,7 @@ func patchJS(js []byte) ([]byte, int, error) {
 			if m.required {
 				return nil, 0, fmt.Errorf("required marker %q not found (unsupported version or already patched)", m.name)
 			}
-		case len(matches) > 1:
+		case len(matches) > 1 && m.required:
 			return nil, 0, fmt.Errorf("marker %q matched %d times (expected 1)", m.name, len(matches))
 		default:
 			out = m.re.ReplaceAll(out, []byte(m.replace))
@@ -151,16 +155,11 @@ func patchJS(js []byte) ([]byte, int, error) {
 }
 
 // IsPatched reports whether the binary already looks patched (idempotency and
-// watcher use). It checks both the native URL and the JS gate marker.
+// watcher use). The native ad-URL string is the primary signal; the JS bundle
+// is only rewritten when the native URL was found, so checking the URL is
+// sufficient for the watcher to detect "needs re-patch" after an update.
 func IsPatched(b *Binary) bool {
-	if b.Count([]byte(blankURL)) == 0 {
-		return false
-	}
-	// count native AD_LINK occurrences: must be 0
-	if b.Count([]byte(adLink)) != 0 {
-		return false
-	}
-	return true
+	return b.Count([]byte(adLink)) == 0 && b.Count([]byte(blankURL)) > 0
 }
 
 func joinNotes(notes []string) string {
@@ -173,5 +172,3 @@ func joinNotes(notes []string) string {
 	}
 	return out
 }
-
-var _ = bytes.Contains // keep bytes import if unused later

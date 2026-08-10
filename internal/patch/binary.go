@@ -73,16 +73,6 @@ func (b *Binary) ReplaceAll(old, rep []byte) (int, error) {
 	}
 	return len(idxs), nil
 }
-
-// MustReplaceAll is ReplaceAll but panics on error (for hardcoded markers).
-func (b *Binary) MustReplaceAll(old, rep []byte) int {
-	n, err := b.ReplaceAll(old, rep)
-	if err != nil {
-		panic(err)
-	}
-	return n
-}
-
 // Count returns how many times pattern occurs in the data.
 func (b *Binary) Count(pattern []byte) int {
 	return len(findAll(b.data, pattern))
@@ -155,10 +145,12 @@ func parseFat(data []byte) ([]machoSlice, error) {
 	var out []machoSlice
 	for i := 0; i < int(n); i++ {
 		e := 8 + i*entrySize
-		out = append(out, machoSlice{
-			offset: binary.BigEndian.Uint32(data[e+8 : e+12]),
-			size:   binary.BigEndian.Uint32(data[e+12 : e+16]),
-		})
+		off := binary.BigEndian.Uint32(data[e+8 : e+12])
+		size := binary.BigEndian.Uint32(data[e+12 : e+16])
+		if uint64(off)+uint64(size) > uint64(len(data)) {
+			return nil, fmt.Errorf("fat slice %d out of bounds (off %d size %d file %d)", i, off, size, len(data))
+		}
+		out = append(out, machoSlice{offset: off, size: size})
 	}
 	return out, nil
 }
