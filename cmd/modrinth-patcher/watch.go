@@ -163,17 +163,20 @@ func uninstallLaunchAgent() error {
 
 func installScheduledTask(exe string) error {
 	// Runs at logon; the task starts the watcher loop which stays alive.
-	// /TR quoting for cmd.exe: wrap in \"...\" (cmd does not treat \ as an
-	// escape char, so a plain backslash-quote pair is correct).
-	cmd := fmt.Sprintf(
-		`schtasks /Create /F /TN "ModrinthPatcher" /TR "\"%s\" --watch" /SC ONLOGON /RL LIMITED`,
-		exe,
+	// Call schtasks.exe directly (not via cmd.exe /C) so Go's Windows
+	// argument quoting handles the embedded quotes in /TR correctly.
+	tr := fmt.Sprintf(`"%s" --watch`, exe)
+	return runCommand("schtasks",
+		"/Create", "/F",
+		"/TN", "ModrinthPatcher",
+		"/TR", tr,
+		"/SC", "ONLOGON",
+		"/RL", "LIMITED",
 	)
-	return runCommand("cmd.exe", "/C", cmd)
 }
 
 func uninstallScheduledTask() error {
-	return runCommand("cmd.exe", "/C", `schtasks /Delete /F /TN "ModrinthPatcher"`)
+	return runCommand("schtasks", "/Delete", "/F", "/TN", "ModrinthPatcher")
 }
 
 func logPath() string {
