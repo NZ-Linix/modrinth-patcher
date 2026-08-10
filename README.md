@@ -37,6 +37,8 @@ The app ships as a single native binary with the entire frontend
    - replaces the ad-showing watcher with a no-op
    - neuters the `init/show/hide_ads_window` helpers (defense in depth)
    - blanks the "Modrinth Plus" and "Modrinth Hosting" promo URLs
+   - removes the `.app-sidebar::after` gradient fade-strip that blended the
+     sidebar into the ad slot (patched in the embedded stylesheet)
    
    The patched JS is recompressed (brotli q9) and written back zero-padded to
    the original size, so every other embedded asset stays put.

@@ -119,6 +119,25 @@ func ApplyPatches(b *Binary) (string, error) {
 			return err
 		}
 		notes = append(notes, fmt.Sprintf("slice@%#x: %s rewritten (%d marker(s), %d compressed bytes)", off, mainKey, changed, compressed))
+
+		// 2b. CSS layer: remove the ad fade-out strip (`.app-sidebar::after`).
+		//     The stylesheet is referenced from /index.html.
+		if cssKey := am.CSSChunkKey(); cssKey != "" {
+			css, ok := am.Asset(cssKey)
+			if ok {
+				patchedCSS, cssChanged, err := patchCSS(css)
+				if err != nil {
+					return err
+				}
+				if cssChanged > 0 {
+					compressedCSS, err := b.ReplaceAsset(am, cssKey, patchedCSS)
+					if err != nil {
+						return err
+					}
+					notes = append(notes, fmt.Sprintf("slice@%#x: %s rewritten (%d marker(s), %d compressed bytes)", off, cssKey, cssChanged, compressedCSS))
+				}
+			}
+		}
 		return nil
 	}); err != nil {
 		return "", err
@@ -143,6 +162,58 @@ func patchJS(js []byte) ([]byte, int, error) {
 			}
 		case len(matches) > 1 && m.required:
 			return nil, 0, fmt.Errorf("marker %q matched %d times (expected 1)", m.name, len(matches))
+		default:
+			out = m.re.ReplaceAll(out, []byte(m.replace))
+			changed++
+		}
+	}
+	if changed == 0 {
+		return nil, 0, nil
+	}
+	return out, changed, nil
+}
+
+// CSS marker: the `.app-sidebar::after` gradient strip that fades the sidebar
+// into the ad slot (5rem tall, positioned at bottom:250px). It exists purely
+// for the ad; with ads removed it leaves an empty gradient bar. Neutralize it
+// by replacing its body with `display:none`.
+//
+// The rule is compiled+scoped by the CSS pipeline:
+//
+//	.app-sidebar[data-v-XXXXXXXX]:after{content:"";background:var(--brand-gradient-fade-out-color);pointer-events:none;height:5rem;position:absolute;bottom:250px;left:0;right:0}
+//
+// We match the stable tail (variable name + geometry) so the data-v hash
+// doesn't matter.
+var cssMarkers = []cssMarker{
+	{
+		name:     "ad fade-out strip (.app-sidebar::after)",
+		re:       regexp.MustCompile(regexp.QuoteMeta(":after{content:\"\";background:var(--brand-gradient-fade-out-color);pointer-events:none;height:5rem;position:absolute;bottom:250px;left:0;right:0}")),
+		replace:  ":after{content:\"\";display:none}",
+		required: true,
+	},
+}
+
+type cssMarker struct {
+	name     string
+	re       *regexp.Regexp
+	replace  string
+	required bool
+}
+
+// patchCSS applies the cssMarkers to the decompressed stylesheet. It returns
+// the patched bytes and how many markers matched.
+func patchCSS(css []byte) ([]byte, int, error) {
+	out := append([]byte(nil), css...)
+	changed := 0
+	for _, m := range cssMarkers {
+		matches := m.re.FindAll(out, -1)
+		switch {
+		case len(matches) == 0:
+			if m.required {
+				return nil, 0, fmt.Errorf("required CSS marker %q not found (unsupported version or already patched)", m.name)
+			}
+		case len(matches) > 1 && m.required:
+			return nil, 0, fmt.Errorf("CSS marker %q matched %d times (expected 1)", m.name, len(matches))
 		default:
 			out = m.re.ReplaceAll(out, []byte(m.replace))
 			changed++

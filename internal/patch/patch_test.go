@@ -124,3 +124,33 @@ func findFixture(t *testing.T) string {
 	}
 	return ""
 }
+
+// TestCSSMarker verifies the fade-strip marker neutralizes the exact compiled
+// rule shape found in the v0.17.4 stylesheet.
+func TestCSSMarker(t *testing.T) {
+	css := []byte(`.app-sidebar[data-v-de52d827]:after{content:"";background:var(--brand-gradient-fade-out-color);pointer-events:none;height:5rem;position:absolute;bottom:250px;left:0;right:0}.app-sidebar.has-plus[data-v-de52d827]:after{display:none}`)
+	out, changed, err := patchCSS(css)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed != 1 {
+		t.Fatalf("expected 1 marker, got %d", changed)
+	}
+	if !bytes.Contains(out, []byte(`:after{content:"";display:none}`)) {
+		t.Fatalf("display:none replacement missing: %s", out)
+	}
+	if bytes.Contains(out, []byte(`height:5rem;position:absolute;bottom:250px`)) {
+		t.Fatalf("fade geometry still present: %s", out)
+	}
+}
+
+// TestCSSChunkKey verifies stylesheet discovery from index.html (modulepreload
+// js link comes first).
+func TestCSSChunkKey(t *testing.T) {
+	html := []byte(`<script src="/assets/index-ABC123.js"></script>
+<link rel="modulepreload" href="/assets/chunk-XYZ789.js">
+<link rel="stylesheet" href="/assets/index-D6ZHPkTV.css">`)
+	if got := extractCSSChunkKey(html); got != "/assets/index-D6ZHPkTV.css" {
+		t.Fatalf("got %q", got)
+	}
+}

@@ -174,6 +174,15 @@ func (am *AssetMap) MainChunkKey() string {
 	return extractMainChunkKey(am.assets[idx].Value)
 }
 
+// CSSChunkKey returns the key of the main stylesheet (from /index.html).
+func (am *AssetMap) CSSChunkKey() string {
+	idx, ok := am.byKey["/index.html"]
+	if !ok {
+		return ""
+	}
+	return extractCSSChunkKey(am.assets[idx].Value)
+}
+
 // Asset returns the decompressed value for a key.
 func (am *AssetMap) Asset(key string) ([]byte, bool) {
 	idx, ok := am.byKey[key]
@@ -238,6 +247,31 @@ func extractMainChunkKey(html []byte) string {
 		end++
 	}
 	return "/assets/" + string(html[start:end])
+}
+
+// extractCSSChunkKey parses the main stylesheet path from /index.html content.
+// There may be several href="/assets/..." links (modulepreload js, css);
+// find the one whose path ends in .css.
+func extractCSSChunkKey(html []byte) string {
+	needle := []byte(`href="/assets/`)
+	from := 0
+	for {
+		i := bytes.Index(html[from:], needle)
+		if i < 0 {
+			return ""
+		}
+		i += from
+		start := i + len(needle)
+		end := start
+		for end < len(html) && html[end] != '"' {
+			end++
+		}
+		key := "/assets/" + string(html[start:end])
+		if len(key) >= 4 && key[len(key)-4:] == ".css" {
+			return key
+		}
+		from = end + 1
+	}
 }
 
 func brotliCompress(data []byte, quality int) ([]byte, error) {
