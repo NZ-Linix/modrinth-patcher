@@ -132,26 +132,64 @@ internal/patch/         core: binary handling, asset extraction, JS markers
   proxy, or just trust the URL rewrite).
 - `strings <binary> | grep wrapper/app-ads-cookie` returns nothing.
 
-## Install to PATH (global `modrinth-patcher` command)
+## Install / Uninstall
 
-The repo ships installer scripts that copy the newest build from `dist/` onto
-your PATH as `modrinth-patcher`:
+The installer scripts are the recommended way: they download the newest
+binary, install it to your PATH, **quit the Modrinth App, patch it, and
+relaunch it** — with a small terminal UI. The uninstallers reverse everything.
+
+### One-liners
+
+> The repo is **private**, so remote runs need a token:
+> set `GH_TOKEN` first (a fine-grained or classic token with `repo` scope).
 
 ```sh
-# macOS / Linux
-./install.sh                 # installs to /usr/local/bin (sudo if needed)
+# macOS — install (patch ads out)
+export GH_TOKEN=gho_xxx
+curl -fsSL "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/install.sh" | bash
 
-# Windows (double-click or from cmd/PowerShell)
-install.bat                  # installs to %LOCALAPPDATA%\Programs\modrinth-patcher
+# macOS — uninstall (restore original)
+curl -fsSL "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/uninstall.sh" | bash
 ```
 
+```powershell
+# Windows — install (run in PowerShell)
+$env:GH_TOKEN = "gho_xxx"
+iex (irm "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/install.bat")
+
+# Windows — uninstall
+iex (irm "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/uninstall.bat")
+```
+
+### Local runs
+
+```sh
+# macOS
+./install.sh                 # installs to /usr/local/bin, patches, relaunches
+./uninstall.sh               # restores original, removes patcher + watcher
+
+# Windows (cmd or double-click)
+install.bat                  # installs to %LOCALAPPDATA%\Programs\modrinth-patcher
+uninstall.bat
+```
+
+### Options
+
+| Env var       | Meaning                                        | Default |
+|---------------|------------------------------------------------|---------|
+| `DEST_DIR`    | install destination                            | `/usr/local/bin` (mac) / `%LOCALAPPDATA%\Programs\modrinth-patcher` (win) |
+| `MP_REPO`     | GitHub repo for downloads                      | `NZ-Linix/modrinth-patcher` |
+| `MP_REF`      | branch/tag/commit                              | `main` |
+| `GH_TOKEN`    | token for the private repo                     | — |
+| `MP_BINARY`   | patch a specific app binary instead of auto    | auto-detect |
+| `DRY_RUN`     | print actions without doing them               | `0` |
+
 - `install.sh` picks `modrinth-patcher-macos-arm64` on Apple Silicon and
-  `modrinth-patcher-macos-x64` on Intel; override the destination with
-  `DEST_DIR=~/bin ./install.sh`.
+  `modrinth-patcher-macos-x64` on Intel; uses the local `dist/` build when
+  present, otherwise downloads from GitHub.
 - `install.bat` installs `modrinth-patcher-windows-amd64.exe`, adds the
   folder to your **user** PATH (no admin needed), and is idempotent
   (re-running won't duplicate the PATH entry). Open a new terminal after
   installing for PATH changes to take effect.
-
-Both always overwrite with the current `dist/` build, so re-run after
-rebuilding.
+- Both quit the running Modrinth App before patching and relaunch it after.
+- Both always overwrite with the newest build, so re-run after rebuilding.

@@ -1,82 +1,138 @@
 @echo off
-rem install.bat — installs the newest modrinth-patcher build from .\dist
-rem onto the system PATH as modrinth-patcher.
+rem ============================================================================
+rem  modrinth-patcher installer (Windows)
 rem
-rem Default destination: %LOCALAPPDATA%\Programs\modrinth-patcher
-rem Override with: set DEST_DIR=C:\Tools && install.bat
+rem  Installs the newest modrinth-patcher build, quits the Modrinth App if it
+rem  is running, patches ads out, and relaunches the app.
+rem
+rem  Run locally:   install.bat
+rem  Run remotely:  PowerShell:  iex (irm <url>)        (see README one-liner)
+rem
+rem  Environment overrides:
+rem    DEST_DIR=C:\Tools     install destination  (default %LOCALAPPDATA%\Programs\modrinth-patcher)
+rem    MP_REPO=owner/repo    GitHub repo          (default NZ-Linix/modrinth-patcher)
+rem    MP_REF=main           branch/tag/commit    (default main)
+rem    GH_TOKEN=...          token for PRIVATE repo downloads
+rem    MP_BINARY=C:\path     patch a specific app binary instead of auto-detect
+rem    DRY_RUN=1             print actions without quitting/patching/relaunching
+rem ============================================================================
 setlocal EnableDelayedExpansion
 
-set "SCRIPT_DIR=%~dp0"
-set "DIST_DIR=%SCRIPT_DIR%dist"
-if defined DEST_DIR (
-	set "DEST_DIR=%DEST_DIR%"
-) else (
-	set "DEST_DIR=%LOCALAPPDATA%\Programs\modrinth-patcher"
-)
+if defined DEST_DIR ( set "DEST_DIR=%DEST_DIR%" ) else ( set "DEST_DIR=%LOCALAPPDATA%\Programs\modrinth-patcher" )
+if defined MP_REPO ( set "REPO=%MP_REPO%" ) else ( set "REPO=NZ-Linix/modrinth-patcher" )
+if defined MP_REF ( set "REF=%MP_REF%" ) else ( set "REF=main" )
+if defined DRY_RUN ( set "DRY_RUN=%DRY_RUN%" ) else ( set "DRY_RUN=0" )
+set "BIN_NAME=modrinth-patcher-windows-amd64.exe"
 
-rem --- 1. pick the binary ------------------------------------------------
+rem ── tiny TUI ───────────────────────────────────────────────────────────────
+rem enable ANSI on modern Windows 10+ (harmless no-op elsewhere)
+for /f %%A in ('echo prompt $E ^| cmd') do set "ESC=%%A"
+set "C_GREEN=%ESC%[32m"
+set "C_CYAN=%ESC%[36m"
+set "C_YELLOW=%ESC%[33m"
+set "C_RED=%ESC%[31m"
+set "C_BOLD=%ESC%[1m"
+set "C_DIM=%ESC%[2m"
+set "C_RESET=%ESC%[0m"
+
+echo %C_BOLD%%C_CYAN%==========================================================%C_RESET%
+echo %C_BOLD%%C_CYAN%  modrinth-patcher - remove ads from Modrinth App%C_RESET%
+echo %C_BOLD%%C_CYAN%  https://github.com/%REPO%%C_RESET%
+echo %C_BOLD%%C_CYAN%==========================================================%C_RESET%
+
+rem ── helpers ────────────────────────────────────────────────────────────────
+set "MP_EXE=%DEST_DIR%\modrinth-patcher.exe"
+set "APP_BIN=%LOCALAPPDATA%\Modrinth App\Modrinth App.exe"
+if not exist "%APP_BIN%" set "APP_BIN=%LOCALAPPDATA%\Programs\Modrinth App\Modrinth App.exe"
+if not exist "%APP_BIN%" set "APP_BIN="
+
+call :find_patcher_proc
+set "APP_RUNNING=!FOUND!"
+
+rem ── 1. pick binary (local dist or download) ───────────────────────────────
 set "SRC="
-if exist "%DIST_DIR%\modrinth-patcher-windows-amd64.exe" (
-	set "SRC=%DIST_DIR%\modrinth-patcher-windows-amd64.exe"
-)
-if "%SRC%"=="" (
-	echo error: no Windows binary found in %DIST_DIR% ^(build one first: go build^)
-	exit /b 1
+if exist "%~dp0dist\%BIN_NAME%" (
+    set "SRC=%~dp0dist\%BIN_NAME%"
+    echo %C_GREEN%  Using local build: !SRC!%C_RESET%
+) else (
+    echo %C_CYAN%  Downloading %BIN_NAME%...%C_RESET%
+    call :download_binary
+    if errorlevel 1 (
+        echo %C_RED%  Download failed - the repo is private; set GH_TOKEN and retry%C_RESET%
+        exit /b 1
+    )
+    echo %C_GREEN%  Downloaded to !SRC!%C_RESET%
 )
 
-rem --- 2. install (always overwrites) ------------------------------------
+rem ── 2. install ────────────────────────────────────────────────────────────
 if not exist "%DEST_DIR%" mkdir "%DEST_DIR%"
-copy /Y "%SRC%" "%DEST_DIR%\modrinth-patcher.exe" >nul
+copy /Y "!SRC!" "%MP_EXE%" >nul
 if errorlevel 1 (
-	echo error: could not copy to %DEST_DIR%
-	exit /b 1
+    echo %C_RED%  could not copy to %DEST_DIR%%C_RESET%
+    exit /b 1
+)
+echo %C_GREEN%  Installed %MP_EXE%%C_RESET%
+
+if "%DRY_RUN%"=="1" (
+    echo %C_DIM%  [dry-run] would: close Modrinth App, run patcher, relaunch app%C_RESET%
+    exit /b 0
 )
 
-rem --- 3. add to user PATH if not already present ------------------------
-rem Read the current user PATH. The value line looks like:
-rem     Path    REG_EXPAND_SZ    C:\foo;C:\bar
-rem so we take the 3rd token onward (skip name + type).
-set "KEY=HKCU\Environment"
-set "CURPATH="
-for /f "tokens=1,2,* delims= " %%A in ('reg query "%KEY%" /v Path 2^>nul') do (
-	if /i "%%A"=="Path" set "CURPATH=%%C"
+rem ── 3. quit app ───────────────────────────────────────────────────────────
+if not defined APP_BIN (
+    echo %C_GREEN%  Modrinth App not found - skipping close/relaunch%C_RESET%
+    goto :patch
 )
-
-rem Check via a temp file (the pipe + delayed expansion combo is
-rem unreliable). Use "." in place of "\" in the search so it matches on
-rem both real Windows and wine's findstr.
-set "PATHCHK=%TEMP%\mp-pathchk.txt"
-set "DEST_DOT=!DEST_DIR:\=.!"
-> "%PATHCHK%" echo !CURPATH!
-findstr /i /c:"!DEST_DOT!" "%PATHCHK%" >nul
-set "FOUND=!errorlevel!"
-del /q "%PATHCHK%" >nul 2>&1
-if "!FOUND!"=="1" (
-	rem append to the user PATH (no machine-wide changes, no admin needed)
-	if "!CURPATH!"=="" (
-		set "NEWPATH=!DEST_DIR!"
-	) else (
-		set "NEWPATH=!CURPATH!;!DEST_DIR!"
-	)
-	reg add "%KEY%" /v Path /t REG_EXPAND_SZ /d "!NEWPATH!" /f >nul
-	if errorlevel 1 (
-		echo warning: could not update PATH registry key
-	) else (
-		echo added to user PATH: !DEST_DIR!
-	)
+if "!APP_RUNNING!"=="1" (
+    echo %C_CYAN%  Closing Modrinth App...%C_RESET%
+    taskkill /IM "Modrinth App.exe" /F >nul 2>&1
+    timeout /t 2 /nobreak >nul
+    echo %C_GREEN%  Modrinth App closed%C_RESET%
 ) else (
-	echo already on PATH: !DEST_DIR!
+    echo %C_GREEN%  Modrinth App not running%C_RESET%
 )
 
-rem --- 4. verify ---------------------------------------------------------
-"%DEST_DIR%\modrinth-patcher.exe" --version >nul 2>&1
+:patch
+rem ── 4. patch ──────────────────────────────────────────────────────────────
+echo %C_CYAN%  Patching ads out...%C_RESET%
+if defined MP_BINARY (
+    "%MP_EXE%" --binary "%MP_BINARY%"
+) else (
+    "%MP_EXE%"
+)
 if errorlevel 1 (
-	echo warning: installed but --version failed
-) else (
-	echo installed: %SRC% -^> %DEST_DIR%\modrinth-patcher.exe
-	"%DEST_DIR%\modrinth-patcher.exe" --version
+    echo %C_RED%  Patch failed%C_RESET%
+    exit /b 1
+)
+echo %C_GREEN%  Ads patched%C_RESET%
+
+rem ── 5. relaunch ───────────────────────────────────────────────────────────
+if defined APP_BIN (
+    start "" "%APP_BIN%"
+    echo %C_GREEN%  Modrinth App relaunched%C_RESET%
 )
 
-rem note: PATH changes apply to NEW terminals only
-echo note: open a new terminal for PATH changes to take effect
-endlocal
+echo.
+echo %C_GREEN%  Done - ads removed. The watcher re-patches after updates automatically.%C_RESET%
+exit /b 0
+
+rem ── subroutines ───────────────────────────────────────────────────────────
+:find_patcher_proc
+set "FOUND=0"
+tasklist /FI "IMAGENAME eq Modrinth App.exe" 2>nul | find /i "Modrinth App.exe" >nul && set "FOUND=1"
+exit /b 0
+
+:download_binary
+set "TMPDL=%TEMP%\mp-patcher-%BIN_NAME%"
+if exist "%TMPDL%" del /q "%TMPDL%" >nul 2>&1
+if defined GH_TOKEN (
+    call curl -fsSL -L -H "Authorization: Bearer %GH_TOKEN%" -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/%REPO%/contents/dist/%BIN_NAME%?ref=%REF%" -o "%TMPDL%"
+) else (
+    call curl -fsSL "https://raw.githubusercontent.com/%REPO%/%REF%/dist/%BIN_NAME%" -o "%TMPDL%" 2>nul
+    if errorlevel 1 (
+        call curl -fsSL -L -H "Accept: application/vnd.github.raw" "https://api.github.com/repos/%REPO%/contents/dist/%BIN_NAME%?ref=%REF%" -o "%TMPDL%"
+    )
+)
+if errorlevel 1 exit /b 1
+set "SRC=%TMPDL%"
+exit /b 0
