@@ -140,6 +140,11 @@ Without the watcher, just run the patcher again.
 > binary path. Re-run the installer once — it re-registers the watcher at the
 > installed location:
 > `curl -fsSL https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/install.sh | bash`
+>
+> On Windows, if `schtasks /Create` is denied by policy ("Access is denied"),
+> the patcher automatically falls back to a per-user HKCU `Run` entry
+> (launched hidden via wscript) — no admin needed. `--unpatch` removes both
+> the scheduled task and the Run entry.
 
 ### Unpatch / restore
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/nzxt/modrinth-patcher/internal/patch"
@@ -162,6 +163,25 @@ func uninstallLaunchAgent() error {
 }
 
 func installScheduledTask(exe string) error {
+	// Prefer a scheduled task; on many systems (or with restricted
+	// policies) schtasks /Create returns "Access is denied", so fall back
+	// to a per-user HKCU Run entry that needs no admin rights.
+	err := createScheduledTask(exe)
+	if err == nil {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "watcher: schtasks failed (%v) — falling back to HKCU Run entry\n", err)
+	return createRunEntry(exe)
+}
+
+func uninstallScheduledTask() error {
+	// remove both the task (if present) and the Run entry (if present)
+	_ = runCommand("schtasks", "/Delete", "/F", "/TN", "ModrinthPatcher")
+	return removeRunEntry()
+}
+
+// createScheduledTask registers a logon scheduled task that runs the watcher.
+func createScheduledTask(exe string) error {
 	// Runs at logon; the task starts the watcher loop which stays alive.
 	// Call schtasks.exe directly (not via cmd.exe /C) so Go's Windows
 	// argument quoting handles the embedded quotes in /TR correctly.
@@ -175,8 +195,37 @@ func installScheduledTask(exe string) error {
 	)
 }
 
-func uninstallScheduledTask() error {
-	return runCommand("schtasks", "/Delete", "/F", "/TN", "ModrinthPatcher")
+// createRunEntry adds a HKCU\...\Run value that launches the watcher at
+// logon via a hidden VBS wrapper (no console window, no admin required).
+func createRunEntry(exe string) error {
+	// VBS launcher: start the watcher hidden.
+	vbs := filepath.Join(os.Getenv("TEMP"), "mp-patcher-watch.vbs")
+	vbsContent := fmt.Sprintf(
+		`CreateObject("Wscript.Shell").Run "%s" --watch, 0, False`+"\r\n",
+		strings.ReplaceAll(exe, `"`, `""`),
+	)
+	if err := os.WriteFile(vbs, []byte(vbsContent), 0o644); err != nil {
+		return fmt.Errorf("write vbs launcher: %w", err)
+	}
+	// HKCU Run — per-user, no admin needed. Call reg.exe directly so Go's
+	// Windows argument quoting handles the backslashes and quotes.
+	runKey := `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+	value := `wscript.exe "` + vbs + `"`
+	return runCommand("reg",
+		"add", runKey,
+		"/v", "ModrinthPatcher",
+		"/t", "REG_SZ",
+		"/d", value,
+		"/f",
+	)
+}
+
+// removeRunEntry deletes the HKCU Run value and the VBS launcher.
+func removeRunEntry() error {
+	vbs := filepath.Join(os.Getenv("TEMP"), "mp-patcher-watch.vbs")
+	_ = os.Remove(vbs)
+	runKey := `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+	return runCommand("reg", "delete", runKey, "/v", "ModrinthPatcher", "/f")
 }
 
 func logPath() string {
