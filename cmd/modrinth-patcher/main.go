@@ -121,9 +121,13 @@ func runPatch(abs string, installWatch bool) error {
 	} else {
 		// backup: keep the pristine original of the *current* version. After an
 		// app self-update the binary changes; refresh the backup so --unpatch
-		// restores the matching version.
+		// restores the matching version. Only refresh when the binary is
+		// native-unpatched — if it's already ad-patched (e.g. by an older
+		// patcher build), keep the existing pristine backup untouched.
 		backup := abs + ".orig"
-		if cur, err := os.ReadFile(backup); err != nil || !bytes.Equal(cur, b.Data()) {
+		if patch.IsNativePatched(b) {
+			fmt.Println("binary is already ad-patched (older build); keeping existing backup")
+		} else if cur, err := os.ReadFile(backup); err != nil || !bytes.Equal(cur, b.Data()) {
 			if err := writeFileAtomic(backup, b.Data(), 0o755); err != nil {
 				return fmt.Errorf("backup: %w", err)
 			}

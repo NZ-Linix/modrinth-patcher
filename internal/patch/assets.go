@@ -72,24 +72,21 @@ func parseAssetTable(b *Binary, sliceOff, sliceLen int) (*AssetMap, error) {
 				break
 			}
 			end := i + len(tp)
-			next := indexOf(b.data, assetsPat, end)
-			if next < 0 || next >= limit {
-				next = limit
-			}
-			if next > end && probeBrotli(b.data[end:next]) {
+			// The blob may contain "/assets/" sequences (compressed data is
+			// arbitrary bytes), so don't trust the next-key boundary. Probe
+			// with a tolerant wide window: the brotli stream self-terminates.
+			val, err := decompressAt(b.data, end, limit)
+			if err == nil {
 				key := string(tp)
 				if _, dup := am.byKey[key]; !dup {
-					val, err := decompressAt(b.data, end, next)
-					if err == nil {
-						idx := len(am.assets)
-						am.assets = append(am.assets, Asset{
-							Key:        key,
-							Value:      val,
-							blobOffset: end,
-							blobLen:    next - end,
-						})
-						am.byKey[key] = idx
-					}
+					idx := len(am.assets)
+					am.assets = append(am.assets, Asset{
+						Key:        key,
+						Value:      val,
+						blobOffset: end,
+						blobLen:    blobLenFor(b.data, end, limit),
+					})
+					am.byKey[key] = idx
 				}
 				break // only the asset instance (followed by brotli) matters
 			}
@@ -112,18 +109,12 @@ func parseAssetTable(b *Binary, sliceOff, sliceLen int) (*AssetMap, error) {
 			scan = i + 1
 			continue
 		}
-		// bound the blob: next asset key string or slice end
-		next := indexOf(b.data, assetsPat, end)
-		if next < 0 || next >= limit {
-			next = limit
-		}
-		if next-end <= 0 {
-			scan = i + 1
-			continue
-		}
-		val, err := decompressAt(b.data, end, next)
+		// Tolerant decompression: the stream self-terminates, so we don't
+		// need an exact boundary. We only require the key to be followed by
+		// some valid brotli stream before the slice end.
+		val, err := decompressAt(b.data, end, limit)
 		if err != nil {
-			// not an asset value (incidental string); skip
+			// not an asset value (incidental string); skip this occurrence
 			scan = i + 1
 			continue
 		}
@@ -132,10 +123,10 @@ func parseAssetTable(b *Binary, sliceOff, sliceLen int) (*AssetMap, error) {
 			Key:        key,
 			Value:      val,
 			blobOffset: end,
-			blobLen:    next - end,
+			blobLen:    blobLenFor(b.data, end, limit),
 		})
 		am.byKey[key] = idx
-		scan = next
+		scan = i + 1
 	}
 
 	if len(am.assets) == 0 {
@@ -216,8 +207,11 @@ func (b *Binary) ReplaceAsset(am *AssetMap, key string, value []byte) (int, erro
 	return len(comp), nil
 }
 
-// decompressAt brotli-decompresses data[start:end]; end may be larger than the
-// actual stream (padding) — brotli stops at the stream terminator.
+// decompressAt brotli-decompresses data[start:end]. end is a *hint* (the
+// presumed blob boundary); if decompression with that window fails due to a
+// false boundary (e.g. a "/assets/" string occurring inside the compressed
+// stream), it retries with a wide window up to the end of the data, treating
+// the stream's own end-of-stream as the real boundary.
 func decompressAt(data []byte, start, end int) ([]byte, error) {
 	if end > len(data) {
 		end = len(data)
@@ -225,13 +219,36 @@ func decompressAt(data []byte, start, end int) ([]byte, error) {
 	if start >= end {
 		return nil, fmt.Errorf("empty range")
 	}
-	return brotliDecompress(bytes.NewReader(data[start:end]))
+	out, err := brotliDecompress(bytes.NewReader(data[start:end]))
+	if err == nil {
+		return out, nil
+	}
+	// Retry with the full remaining data as window. The brotli reader stops at
+	// the stream terminator; trailing bytes surface as "excessive input",
+	// which we treat as a clean end.
+	out, err2 := brotliDecompressTolerant(bytes.NewReader(data[start:]))
+	if err2 == nil {
+		return out, nil
+	}
+	return nil, err
 }
 
-// probeBrotli reports whether data begins with a valid brotli stream.
+// probeBrotli reports whether data begins with a valid brotli stream (using a
+// tolerant read that accepts trailing bytes).
 func probeBrotli(data []byte) bool {
-	_, err := brotliDecompress(bytes.NewReader(data))
+	_, err := brotliDecompressTolerant(bytes.NewReader(data))
 	return err == nil
+}
+
+// brotliDecompressTolerant reads a brotli stream and accepts the library's
+// "excessive input" error (which it reports when trailing bytes follow the
+// stream terminator) as a clean EOF.
+func brotliDecompressTolerant(r io.Reader) ([]byte, error) {
+	out, err := io.ReadAll(brotli.NewReader(r))
+	if err != nil && err.Error() == "brotli: excessive input" {
+		return out, nil
+	}
+	return out, err
 }
 
 // extractMainChunkKey parses the main JS path from /index.html content.
@@ -274,6 +291,30 @@ func extractCSSChunkKey(html []byte) string {
 	}
 }
 
+// blobLenFor estimates the compressed stream length for an asset whose blob
+// starts at `start`. The stream self-terminates; we find its true end by
+// scanning forward for the next *valid* asset key (one whose following bytes
+// decompress). As a fallback it returns the distance to the next "/assets/"
+// string — an upper bound, which is all the in-place rewrite needs.
+func blobLenFor(data []byte, start, limit int) int {
+	scan := start
+	for {
+		next := indexOf(data, []byte("/assets/"), scan)
+		if next < 0 || next >= limit {
+			return limit - start
+		}
+		key, end := readAssetKey(data, next, limit)
+		if key != "" {
+			// candidate boundary: verify it's a real asset (decompresses)
+			if _, err := brotliDecompressTolerant(bytes.NewReader(data[end:limit])); err == nil {
+				return next - start
+			}
+		}
+		scan = next + 1
+	}
+}
+
+// brotliCompress compresses data at the given quality.
 func brotliCompress(data []byte, quality int) ([]byte, error) {
 	var buf bytes.Buffer
 	w := brotli.NewWriterLevel(&buf, quality)

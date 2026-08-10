@@ -154,3 +154,63 @@ func TestCSSChunkKey(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// TestRepatchOldBuild simulates a binary patched by the pre-CSS build: the
+// native URL and JS are done, but the CSS fade-strip is not. Re-running the
+// patcher must apply only the CSS layer and then report fully patched.
+func TestRepatchOldBuild(t *testing.T) {
+	src := findFixture(t)
+	if src == "" {
+		t.Skip("no binary fixture available")
+	}
+	dir := t.TempDir()
+	work := filepath.Join(dir, "Modrinth App")
+	in, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(work, in, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate old build: URL + JS only.
+	b, _ := Open(work)
+	if _, err := b.ReplaceAll([]byte(adLink), []byte(blankURL)); err != nil {
+		t.Fatal(err)
+	}
+	err = b.ForEachSlice(func(off, size int) error {
+		am, err := parseAssetTable(b, off, size)
+		if err != nil {
+			return err
+		}
+		js, _ := am.Asset(am.MainChunkKey())
+		patched, _, err := patchJS(js)
+		if err != nil {
+			return err
+		}
+		_, err = b.ReplaceAsset(am, am.MainChunkKey(), patched)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Write(work); err != nil {
+		t.Fatal(err)
+	}
+
+	// New build runs on it.
+	b2, _ := Open(work)
+	if IsPatched(b2) {
+		t.Fatal("expected IsPatched=false (CSS layer missing)")
+	}
+	if _, err := ApplyPatches(b2); err != nil {
+		t.Fatalf("re-patch: %v", err)
+	}
+	if err := b2.Write(work); err != nil {
+		t.Fatal(err)
+	}
+	b3, _ := Open(work)
+	if !IsPatched(b3) {
+		t.Fatal("expected IsPatched=true after re-patch")
+	}
+}

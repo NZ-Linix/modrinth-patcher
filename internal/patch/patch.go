@@ -75,19 +75,22 @@ func buildMarkers() []jsMarker {
 	return m
 }
 
-// ApplyPatches patches one binary: the native ad-URL strings, then the
-// embedded main JS bundle. It returns a human-readable summary. Calling it on
-// an already-patched binary is a no-op (idempotent).
+// ApplyPatches patches one binary: the native ad-URL strings, the embedded
+// main JS bundle, and the embedded stylesheet. It returns a human-readable
+// summary. Each layer is attempted independently: layers that are already
+// patched (or whose markers are absent) are skipped rather than failing the
+// whole run, so the patcher can be re-run to pick up newly added layers
+// (e.g. the CSS fade-strip fix on a binary patched by an older build).
 func ApplyPatches(b *Binary) (string, error) {
 	var notes []string
 
 	// 1. Native layer: rewrite the ad webview URL.
 	//    macOS universal: once per slice (2 total). Windows: once.
 	if n, err := b.ReplaceAll([]byte(adLink), []byte(blankURL)); err != nil {
-		if b.Count([]byte(blankURL)) > 0 {
-			return "already patched (native URL)", nil
+		if b.Count([]byte(blankURL)) == 0 {
+			return "", fmt.Errorf("ad URL string: %w", err)
 		}
-		return "", fmt.Errorf("ad URL string: %w", err)
+		// already patched — continue to the other layers
 	} else {
 		notes = append(notes, fmt.Sprintf("ad-webview URL rewritten in %d place(s)", n))
 	}
@@ -109,16 +112,16 @@ func ApplyPatches(b *Binary) (string, error) {
 
 		patched, changed, err := patchJS(js)
 		if err != nil {
-			return err
+			// JS already patched or unsupported version — not fatal; the
+			// CSS layer may still need work.
+			notes = append(notes, fmt.Sprintf("slice@%#x: %s skipped (%v)", off, mainKey, err))
+		} else if changed > 0 {
+			compressed, err := b.ReplaceAsset(am, mainKey, patched)
+			if err != nil {
+				return err
+			}
+			notes = append(notes, fmt.Sprintf("slice@%#x: %s rewritten (%d marker(s), %d compressed bytes)", off, mainKey, changed, compressed))
 		}
-		if changed == 0 {
-			return fmt.Errorf("main chunk %q: no ad markers matched (already patched or unsupported version)", mainKey)
-		}
-		compressed, err := b.ReplaceAsset(am, mainKey, patched)
-		if err != nil {
-			return err
-		}
-		notes = append(notes, fmt.Sprintf("slice@%#x: %s rewritten (%d marker(s), %d compressed bytes)", off, mainKey, changed, compressed))
 
 		// 2b. CSS layer: remove the ad fade-out strip (`.app-sidebar::after`).
 		//     The stylesheet is referenced from /index.html.
@@ -127,9 +130,8 @@ func ApplyPatches(b *Binary) (string, error) {
 			if ok {
 				patchedCSS, cssChanged, err := patchCSS(css)
 				if err != nil {
-					return err
-				}
-				if cssChanged > 0 {
+					notes = append(notes, fmt.Sprintf("slice@%#x: %s skipped (%v)", off, cssKey, err))
+				} else if cssChanged > 0 {
 					compressedCSS, err := b.ReplaceAsset(am, cssKey, patchedCSS)
 					if err != nil {
 						return err
@@ -225,12 +227,48 @@ func patchCSS(css []byte) ([]byte, int, error) {
 	return out, changed, nil
 }
 
-// IsPatched reports whether the binary already looks patched (idempotency and
-// watcher use). The native ad-URL string is the primary signal; the JS bundle
-// is only rewritten when the native URL was found, so checking the URL is
-// sufficient for the watcher to detect "needs re-patch" after an update.
-func IsPatched(b *Binary) bool {
+// IsNativePatched reports whether the native ad-webview URL has been
+// rewritten (the primary layer). Used by the CLI to decide whether the
+// current binary is a pristine version (worth backing up) or an
+// already-ad-patched one (keep the existing backup).
+func IsNativePatched(b *Binary) bool {
 	return b.Count([]byte(adLink)) == 0 && b.Count([]byte(blankURL)) > 0
+}
+
+// IsPatched reports whether the binary already has all ad-removal layers
+// applied (native URL, JS bundle, CSS fade-strip). Used for idempotency and
+// by the watcher to detect "needs re-patch" after an update.
+func IsPatched(b *Binary) bool {
+	if b.Count([]byte(adLink)) != 0 || b.Count([]byte(blankURL)) == 0 {
+		return false
+	}
+	// CSS layer: the fade-strip rule must be neutralized. Check per slice by
+	// decompressing the stylesheet.
+	fully := true
+	_ = b.ForEachSlice(func(off, size int) error {
+		am, err := parseAssetTable(b, off, size)
+		if err != nil {
+			fully = false
+			return nil
+		}
+		if cssKey := am.CSSChunkKey(); cssKey != "" {
+			if css, ok := am.Asset(cssKey); ok {
+				if !cssFadePatched(css) {
+					fully = false
+				}
+			}
+		}
+		return nil
+	})
+	return fully
+}
+
+// cssFadePatched reports whether the stylesheet already has the fade-strip
+// rule neutralized.
+func cssFadePatched(css []byte) bool {
+	// The gradient body is gone once patched; the marker regex then finds
+	// nothing, while the unpatched rule matches once.
+	return len(cssMarkers[0].re.FindAll(css, -1)) == 0
 }
 
 func joinNotes(notes []string) string {
