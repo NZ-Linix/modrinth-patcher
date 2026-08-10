@@ -1,0 +1,8 @@
+# build output
+/dist/
+*.exe
+*.orig
+
+# Go
+*.test
+*.out
