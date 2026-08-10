@@ -146,19 +146,22 @@ relaunch it** — with a small terminal UI. The uninstallers reverse everything.
 ```sh
 # macOS — install (patch ads out)
 export GH_TOKEN=gho_xxx
-curl -fsSL "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/install.sh" | bash
+curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/NZ-Linix/modrinth-patcher/contents/install.sh?ref=main" | bash
 
 # macOS — uninstall (restore original)
-curl -fsSL "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/uninstall.sh" | bash
+curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw" \
+  "https://api.github.com/repos/NZ-Linix/modrinth-patcher/contents/uninstall.sh?ref=main" | bash
 ```
 
 ```powershell
 # Windows — install (run in PowerShell)
 $env:GH_TOKEN = "gho_xxx"
-iex (irm "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/install.bat")
+$h = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github.raw" }
+iex (irm -Headers $h "https://api.github.com/repos/NZ-Linix/modrinth-patcher/contents/install.bat?ref=main")
 
 # Windows — uninstall
-iex (irm "https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/uninstall.bat")
+iex (irm -Headers $h "https://api.github.com/repos/NZ-Linix/modrinth-patcher/contents/uninstall.bat?ref=main")
 ```
 
 ### Local runs
