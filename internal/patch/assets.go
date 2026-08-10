@@ -183,9 +183,10 @@ func (am *AssetMap) Asset(key string) ([]byte, bool) {
 	return am.assets[idx].Value, true
 }
 
-// ReplaceAsset recompresses value for key (brotli q9) and writes it in place
-// at the original blob offset, zero-padded to the original size. Returns the
-// compressed size used.
+// ReplaceAsset recompresses value for key (brotli q9, lgwin24) and writes it
+// in place at the original blob offset, zero-padded to the original size.
+// If q9 output exceeds the original blob, it retries at q11 (always smaller);
+// the smallest fitting result is used. Returns the compressed size used.
 func (b *Binary) ReplaceAsset(am *AssetMap, key string, value []byte) (int, error) {
 	idx, ok := am.byKey[key]
 	if !ok {
@@ -195,6 +196,15 @@ func (b *Binary) ReplaceAsset(am *AssetMap, key string, value []byte) (int, erro
 	comp, err := brotliCompress(value, 9)
 	if err != nil {
 		return 0, err
+	}
+	if len(comp) > a.blobLen {
+		// q9 didn't fit (e.g. a new app version with a denser original);
+		// q11 compresses harder and is always <= q9 output.
+		comp2, err2 := brotliCompress(value, 11)
+		if err2 != nil {
+			return 0, err2
+		}
+		comp = comp2
 	}
 	if len(comp) > a.blobLen {
 		return 0, fmt.Errorf("recompressed asset %q (%d) exceeds original (%d)", key, len(comp), a.blobLen)
@@ -315,9 +325,16 @@ func blobLenFor(data []byte, start, limit int) int {
 }
 
 // brotliCompress compresses data at the given quality.
+// brotliCompress compresses data at the given quality with a 24-bit sliding
+// window (LGWin=24), matching the settings the Modrinth App's build pipeline
+// uses. The default LGWin (22) can produce output LARGER than the original
+// embedded blob, which breaks the in-place rewrite.
 func brotliCompress(data []byte, quality int) ([]byte, error) {
 	var buf bytes.Buffer
-	w := brotli.NewWriterLevel(&buf, quality)
+	w := brotli.NewWriterOptions(&buf, brotli.WriterOptions{
+		Quality: quality,
+		LGWin:   24,
+	})
 	if _, err := w.Write(data); err != nil {
 		return nil, err
 	}

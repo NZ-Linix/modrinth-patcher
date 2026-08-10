@@ -44,10 +44,19 @@ func runWatcher() error {
 //
 //	macOS:  ~/Library/LaunchAgents/com.modrinth-patcher.plist (LaunchAgent)
 //	windows: schtasks /create ... (runs at logon)
+//
+// The job must point at a STABLE binary path — the installed patcher
+// (e.g. /usr/local/bin/modrinth-patcher), not the current executable, which
+// may be a temp file (install.sh downloads to a temp dir and deletes it) or
+// a dev build. We prefer the installed path and fall back to os.Executable().
 func installWatcher() error {
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve own path: %w", err)
+	exe := installedPatcherPath()
+	if exe == "" {
+		var err error
+		exe, err = os.Executable()
+		if err != nil {
+			return fmt.Errorf("resolve own path: %w", err)
+		}
 	}
 	exe, _ = filepath.Abs(exe)
 
@@ -59,6 +68,43 @@ func installWatcher() error {
 	default:
 		return fmt.Errorf("no watcher support on %s", runtime.GOOS)
 	}
+}
+
+// installedPatcherPath returns the canonical installed location of the
+// patcher binary, or "" if it isn't installed there. It honors DEST_DIR
+// (set by install.sh/install.bat) and falls back to the standard locations.
+func installedPatcherPath() string {
+	candidates := []string{}
+	if d := os.Getenv("DEST_DIR"); d != "" {
+		switch runtime.GOOS {
+		case "darwin":
+			candidates = append(candidates, filepath.Join(d, "modrinth-patcher"))
+		case "windows":
+			candidates = append(candidates, filepath.Join(d, "modrinth-patcher.exe"))
+		}
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = append(candidates,
+			"/usr/local/bin/modrinth-patcher",
+			"/opt/homebrew/bin/modrinth-patcher",
+			filepath.Join(os.Getenv("HOME"), ".local", "bin", "modrinth-patcher"),
+			filepath.Join(os.Getenv("HOME"), "bin", "modrinth-patcher"),
+		)
+	case "windows":
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			candidates = append(candidates,
+				filepath.Join(local, "Programs", "modrinth-patcher", "modrinth-patcher.exe"),
+				filepath.Join(local, "modrinth-patcher", "modrinth-patcher.exe"),
+			)
+		}
+	}
+	for _, p := range candidates {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 // uninstallWatcher removes the auto-repatch job (used by --unpatch so the

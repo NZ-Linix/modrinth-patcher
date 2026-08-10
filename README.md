@@ -135,6 +135,12 @@ With the watcher installed, nothing to do — it re-patches automatically within
 
 Without the watcher, just run the patcher again.
 
+> **Troubleshooting**: if auto-repatch stopped working after an update (e.g.
+> the app updated but ads came back), the watcher job may point at an old
+> binary path. Re-run the installer once — it re-registers the watcher at the
+> installed location:
+> `curl -fsSL https://raw.githubusercontent.com/NZ-Linix/modrinth-patcher/main/install.sh | bash`
+
 ### Unpatch / restore
 
 ```sh

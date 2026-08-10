@@ -21,6 +21,7 @@ set -euo pipefail
 REPO="${MP_REPO:-NZ-Linix/modrinth-patcher}"
 REF="${MP_REF:-main}"
 DEST_DIR="${DEST_DIR:-/usr/local/bin}"
+export DEST_DIR   # so the patcher child process registers the watcher at the right path
 DRY_RUN="${DRY_RUN:-0}"
 
 # ── tiny TUI ────────────────────────────────────────────────────────────────
