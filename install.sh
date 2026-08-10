@@ -12,7 +12,7 @@
 #   DEST_DIR=~/bin        install destination        (default /usr/local/bin)
 #   MP_REPO=owner/repo    GitHub repo for downloads  (default NZ-Linix/modrinth-patcher)
 #   MP_REF=main           branch/tag/commit          (default main)
-#   GH_TOKEN=...          token for the PRIVATE repo downloads
+#   GH_TOKEN=...          token for downloads (only needed for private forks)
 #   MP_BINARY=/path       patch a specific app binary instead of auto-detecting
 #   DRY_RUN=1             print actions without quitting/patching/relaunching
 #
@@ -92,7 +92,7 @@ download_binary() { # download_binary <out-path>
 		info "Downloading $BIN_NAME…"
 		curl -fsSL --progress-bar -L -H "Authorization: Bearer $tok" \
 			-H "Accept: application/vnd.github.raw" "$api" -o "$out" \
-			|| die "download failed — the repo is private; export GH_TOKEN (see README) and retry"
+			|| die "download failed — if this is a private fork, export GH_TOKEN and retry"
 	fi
 }
 

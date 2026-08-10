@@ -12,7 +12,7 @@ rem  Environment overrides:
 rem    DEST_DIR=C:\Tools     install destination  (default %LOCALAPPDATA%\Programs\modrinth-patcher)
 rem    MP_REPO=owner/repo    GitHub repo          (default NZ-Linix/modrinth-patcher)
 rem    MP_REF=main           branch/tag/commit    (default main)
-rem    GH_TOKEN=...          token for PRIVATE repo downloads
+rem    GH_TOKEN=...          token for downloads (only needed for private forks)
 rem    MP_BINARY=C:\path     patch a specific app binary instead of auto-detect
 rem    DRY_RUN=1             print actions without quitting/patching/relaunching
 rem ============================================================================
@@ -58,7 +58,7 @@ if exist "%~dp0dist\%BIN_NAME%" (
     echo %C_CYAN%  Downloading %BIN_NAME%...%C_RESET%
     call :download_binary
     if errorlevel 1 (
-        echo %C_RED%  Download failed - the repo is private; set GH_TOKEN and retry%C_RESET%
+        echo %C_RED%  Download failed - for a private fork set GH_TOKEN and retry%C_RESET%
         exit /b 1
     )
     echo %C_GREEN%  Downloaded to !SRC!%C_RESET%
