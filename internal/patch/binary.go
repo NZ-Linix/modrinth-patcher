@@ -73,6 +73,7 @@ func (b *Binary) ReplaceAll(old, rep []byte) (int, error) {
 	}
 	return len(idxs), nil
 }
+
 // Count returns how many times pattern occurs in the data.
 func (b *Binary) Count(pattern []byte) int {
 	return len(findAll(b.data, pattern))
