@@ -78,7 +78,7 @@ pick_binary() {
 download_binary() { # download_binary <out-path>
 	local out="$1" tok="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 	local api raw
-	api="https://api.github.com/repos/$REPO/contents/dist/$BIN_NAME?ref=$REF"
+	api="https://api.github.com/repos/$REPO/contents/dist/${BIN_NAME}?ref=$REF"
 	raw="https://raw.githubusercontent.com/$REPO/$REF/dist/$BIN_NAME"
 
 	if [[ -n "$tok" ]]; then
@@ -87,9 +87,9 @@ download_binary() { # download_binary <out-path>
 			-H "Accept: application/vnd.github.raw" "$api" -o "$out" \
 			|| die "download failed — check GH_TOKEN / network"
 	elif curl -fsSL --progress-bar "$raw" -o "$out" 2>/dev/null; then
-		info "Downloading $BIN_NAME…"
+		info "Downloading ${BIN_NAME}…"
 	else
-		info "Downloading $BIN_NAME…"
+		info "Downloading ${BIN_NAME}…"
 		curl -fsSL --progress-bar -L -H "Authorization: Bearer $tok" \
 			-H "Accept: application/vnd.github.raw" "$api" -o "$out" \
 			|| die "download failed — if this is a private fork, export GH_TOKEN and retry"
