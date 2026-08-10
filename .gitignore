@@ -1,8 +1,6 @@
-# build output
-/dist/
-*.exe
-*.orig
-
 # Go
 *.test
 *.out
+
+# backups of patched binaries
+*.orig
